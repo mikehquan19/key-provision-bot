@@ -1,10 +1,10 @@
-import { MessageFlags, ModalSubmitInteraction } from "discord.js";
+import { ModalSubmitInteraction } from "discord.js";
 import { GoogleAuth } from "google-auth-library";
 import "dotenv/config";
 import { KeyProvision, ModalSubmit } from "@/interface.ts";
 import { getKeyProvisionCollection } from "@/utils.ts";
-import CryptoJS from "crypto-js";
 import { randomBytes } from "node:crypto";
+import CryptoJS from "crypto-js";
 
 /**
  * Encrypt the provisioned API key using AES-256 algorithm
@@ -17,35 +17,6 @@ function encryptAPIKey(apiKey: string): string {
 
   const dbKey = CryptoJS.AES.encrypt(apiKey, encryptionKey);
   return dbKey.toString();
-}
-
-/**
- * Decrypt the key stored in DB into the actual API key
- */
-function decryptAPIKey(dbKey: string): string {
-  const encryptionKey = process.env.ENCRYPTION_KEY;
-  if (!encryptionKey) {
-    throw new Error("Undefined ENCRYPTION_KEY");
-  }
-
-  const apiKey = CryptoJS.AES.decrypt(dbKey, encryptionKey).toString(
-    CryptoJS.enc.Utf8,
-  );
-  return apiKey;
-}
-
-/**
- * Check if this user has a provisioned key and returns the key.
- * Otherwise, returns an empty string.
- */
-async function checkExistingKey(userId: string): Promise<string | null> {
-  const collection = await getKeyProvisionCollection();
-
-  const doc = await collection.findOne({ userId: userId });
-  if (!doc) {
-    return null;
-  }
-  return decryptAPIKey(doc.encryptedKey);
 }
 
 type APIConfig = {
@@ -204,13 +175,8 @@ async function createAndPersistKey(
   return createdKey;
 }
 
-type ProvisionResults = {
-  key: string;
-  isNewlyCreated: boolean;
-};
-
 /** Inflight map from a user to a provisioning to control concurrency */
-const inflightProvisions = new Map<string, Promise<ProvisionResults>>();
+const inflightProvisions = new Map<string, Promise<string>>();
 
 /**
  * See singleflight pattern, which is technically a Go concept but the idea is tranferrable
@@ -222,23 +188,15 @@ async function provisionKey(
   projectName: string,
   projectDescription: string,
   apiPurpose: readonly string[],
-): Promise<ProvisionResults> {
+): Promise<string> {
   const existingProvision = inflightProvisions.get(userId);
   if (existingProvision) {
     console.log(`[PROVISION] Joined in-flight request for user ${username}...`);
     return existingProvision;
   }
 
-  // Start the new provision requests on the user
+  // Start the new provision requests on the user (new promise)
   const newProvision = (async () => {
-    const existingKey = await checkExistingKey(userId);
-    if (existingKey) {
-      console.log(`[PROVISION] Existing key found for user ${username}`);
-      return {
-        key: existingKey,
-        isNewlyCreated: false,
-      } as ProvisionResults;
-    }
     const createdKey = await createAndPersistKey(
       userId,
       username,
@@ -247,20 +205,17 @@ async function provisionKey(
       apiPurpose,
     );
     console.log(`[PROVISION] New key created for user ${username}`);
-    return {
-      key: createdKey,
-      isNewlyCreated: true,
-    } as ProvisionResults;
+    return createdKey;
   })();
   console.log(`[PROVISION] Started provisioning for user ${username}...`);
   inflightProvisions.set(userId, newProvision);
 
   try {
-    const provisionResult = await newProvision;
+    const provisionedKey = await newProvision;
     console.log(
       `[PROVISION] Completed provisioning for user ${username} successfully!`,
     );
-    return provisionResult;
+    return provisionedKey;
   } catch (error: any) {
     console.error(`[ERROR] Failed provisioning for user ${username}`, error);
     throw error;
@@ -283,20 +238,13 @@ const provisionKeyModalSubmit: ModalSubmit = {
       `Hello <@${user.id}>! We received your request. We'll DM you later.`,
     );
 
-    const { key, isNewlyCreated } = await provisionKey(
+    const key = await provisionKey(
       user.id,
       user.username,
       projectName,
       fields.getTextInputValue("projDescription"),
       fields.getCheckboxGroup("apiPurpose"),
     );
-
-    if (!isNewlyCreated) {
-      await user.send(
-        `You have been provisioned a key. Your key is ||${key}||. If you have any question, please DM Mike.`,
-      );
-      return;
-    }
     await user.send(
       `Your new key is ||${key}||. Happy coding! If you have any question, please DM Mike.`,
     );

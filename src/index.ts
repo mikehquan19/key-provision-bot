@@ -116,17 +116,10 @@ async function main() {
       await command.execute(interaction);
     } catch (error) {
       console.error(`[ERROR] Error while executing /${commandName}:`, error);
-      if (interaction.replied || interaction.deferred) {
-        await interaction.followUp({
-          content: "Error while executing this command!",
-          flags: MessageFlags.Ephemeral,
-        });
-      } else {
-        await interaction.reply({
-          content: "Error while executing this command!",
-          flags: MessageFlags.Ephemeral,
-        });
-      }
+      await interaction.reply({
+        content: "Error while executing this command!",
+        flags: MessageFlags.Ephemeral,
+      });
     }
   });
 
@@ -151,17 +144,10 @@ async function main() {
       await modalSubmit.execute(interaction);
     } catch (error) {
       console.error(`[ERROR] Error while executing modal ${customId}:`, error);
-      if (interaction.replied || interaction.deferred) {
-        await interaction.followUp({
-          content: "Error while executing this modal submit!",
-          flags: MessageFlags.Ephemeral,
-        });
-      } else {
-        await interaction.reply({
-          content: "Error while executing this modal submit!",
-          flags: MessageFlags.Ephemeral,
-        });
-      }
+      await interaction.reply({
+        content: "Error while executing this modal submit!",
+        flags: MessageFlags.Ephemeral,
+      });
     }
   });
 
